@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Version=1.1
+Name=Easy Autostart
+GenericName=Autostart applications
+Comment=Choose installed applications to start when you log in
+Exec=easyautostart
+Terminal=false
+Categories=Settings

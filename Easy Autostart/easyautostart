@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+
+import configparser
+import os
+
+from PySide6 import QtCore, QtGui, QtWidgets
+from xdg import IconTheme
+from xdg.Config import icon_size
+
+
+# https://specifications.freedesktop.org/autostart-spec/autostart-spec-latest.html
+
+XDG_CONFIG_HOME = os.environ.get('XDG_CONFIG_HOME', None) or os.path.join(os.environ['HOME'], '.config')
+XDG_DATA_DIRS = os.environ['XDG_DATA_DIRS'].split(':')
+autostart_dir = os.path.join(XDG_CONFIG_HOME, 'autostart')
+
+error_msg = 'Easy Autostart was not able to configure autostart for {name}. Autostart for {name} may have been configured without Easy Autostart, in which case Easy Autostart will not be able to configure it.'
+
+
+def get_autostart_path(path):
+    basename = os.path.basename(path)
+    return os.path.join(autostart_dir, basename)
+
+
+def get_entries():
+    # https://specifications.freedesktop.org/desktop-entry-spec/desktop-entry-spec-latest.html
+    desktop_files = {}
+    for directory in XDG_DATA_DIRS:
+        directory = os.path.join(directory, 'applications')
+        try:
+            files = os.listdir(directory)
+        except FileNotFoundError:
+            continue
+        for filename in files:
+            if filename.endswith('.desktop') and filename not in desktop_files:
+                desktop_files[filename] = os.path.join(directory, filename)
+
+    entries = []
+    for path in desktop_files.values():
+        parser = configparser.ConfigParser(strict=False)
+        parser.read(path)
+        d = parser['Desktop Entry']
+        if (d.get('Type', None) != 'Application' or
+                d.get('NoDisplay', None) == 'true' or
+                d.get('Hidden', None) == 'true' or
+                d.get('Terminal', None) == 'true'):
+            continue
+        try:
+            enabled = False
+            managed_elsewhere = False
+            autostart_path = get_autostart_path(path)
+            if os.path.isfile(autostart_path):
+                if os.path.islink(autostart_path):
+                    enabled = True
+                else:
+                    managed_elsewhere = True
+            entries.append({
+                'path': path,
+                'name': d['Name'],
+                'comment': d.get('Comment', ''),
+                'icon': d.get('Icon', None),
+                'enabled': enabled,
+                'managed_elsewhere': managed_elsewhere
+            })
+        except KeyError:
+            continue
+    entries.sort(key=lambda a: a['name'].lower())
+    return entries
+
+
+def get_icon(key):
+    return IconTheme.getIconPath(key)
+
+
+def enable(path):
+    autostart_path = get_autostart_path(path)
+    if not os.path.exists(autostart_path):
+        os.symlink(path, autostart_path)
+        return True
+    return False
+
+
+def disable(path):
+    autostart_path = get_autostart_path(path)
+    if os.path.islink(autostart_path):
+        os.remove(autostart_path)
+        return True
+    return False
+
+
+class MainWindow(QtWidgets.QMainWindow):
+    def __init__(self, entries, *args, **kw):
+        super().__init__(*args, **kw)
+
+        self.scroll = QtWidgets.QScrollArea()
+        self.widget = QtWidgets.QWidget()
+        self.layout = QtWidgets.QVBoxLayout()
+
+        default_font = self.widget.font()
+        bold_font = QtGui.QFont(default_font)
+        bold_font.setWeight(QtGui.QFont.Bold)
+        italic_font = QtGui.QFont(default_font)
+        italic_font.setItalic(True)
+        fonts = {'bold': bold_font, 'italic': italic_font}
+
+        for e in entries:
+            self.layout.addWidget(Entry(e, fonts))
+        self.widget.setLayout(self.layout)
+
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setWidget(self.widget)
+
+        self.setCentralWidget(self.scroll)
+        self.setWindowTitle('Autostart applications')
+        self.show()
+
+
+class Entry(QtWidgets.QWidget):
+    def __init__(self, info, fonts, *args, **kw):
+        super().__init__(*args, **kw)
+        self.info = info
+
+        self.layout = QtWidgets.QVBoxLayout()
+        entry_layout = QtWidgets.QHBoxLayout()
+        self.layout.addLayout(entry_layout)
+        self.cb = QtWidgets.QCheckBox()
+        if info['managed_elsewhere']:
+            self.disable()
+        else:
+            self.cb.setChecked(info['enabled'])
+            self.cb.stateChanged.connect(self.onCheckbox)
+        entry_layout.addWidget(self.cb)
+
+        if info['icon']:
+            path = get_icon(info['icon'])
+            if path:
+                try:
+                    pixmap = QtGui.QPixmap(path).scaled(
+                        QtCore.QSize(icon_size, icon_size),
+                        aspectMode=QtCore.Qt.KeepAspectRatio)
+                except FileNotFoundError:
+                    pass
+                else:
+                    icon = QtWidgets.QLabel()
+                    icon.setPixmap(pixmap)
+                    entry_layout.addWidget(icon)
+
+        name_text = QtWidgets.QLabel(info['name'])
+        name_text.setFont(fonts['bold'])
+        entry_layout.addWidget(name_text)
+        comment_text = QtWidgets.QLabel(info['comment'])
+        comment_text.setFont(fonts['italic'])
+        entry_layout.addWidget(comment_text, stretch=1)
+        self.setLayout(self.layout)
+
+    def disable(self):
+        self.cb.setChecked(False)
+        self.cb.setDisabled(True)
+        self.layout.addWidget(QtWidgets.QLabel(
+            "(Currently managed elsewhere, so can't be managed by Easy Autostart)"))
+
+    def onCheckbox(self):
+        if self.cb.isChecked():
+            success = enable(self.info['path'])
+        else:
+            success = disable(self.info['path'])
+        if not success:
+            self.disable()
+            msgBox = QtWidgets.QMessageBox()
+            msgBox.setWindowTitle('Error')
+            msgBox.setText(error_msg.format(name=self.info['name']))
+            msgBox.exec()
+
+
+if __name__ == '__main__':
+    app = QtWidgets.QApplication([])
+    window = MainWindow(get_entries())
+    app.exec()
