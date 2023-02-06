@@ -18,14 +18,14 @@ If you're interested in making a package for this application, please feel free!
 1. Clone the git repository.
 
 2. Install python3 and python3-pip with your distro's package manager.
-For Debian/Ubuntu-based distros this would be:
-    sudo apt install python3 python3-pip
+For Debian/Ubuntu-based distros this would be:  
+    `sudo apt install python3 python3-pip`
 
-3. Install the python library dependencies:
-    pip install -r requirements.txt
+3. Install the python library dependencies:  
+    `pip install -r requirements.txt`
 
-4. Run install.sh as root to install Easy Autostart:
-    sudo ./install.sh
+4. Run install.sh as root to install Easy Autostart:  
+    `sudo ./install.sh`
 
 
 # How to use
